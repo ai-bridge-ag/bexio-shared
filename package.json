@@ -1,0 +1,21 @@
+{
+  "name": "bexio-shared",
+  "version": "0.1.0",
+  "description": "Read-only Bexio adapter shared by AI Bridge agents",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "index.js",
+    "logger.js",
+    "bexio-auth.js",
+    "bexio-http.js",
+    "bexio-contacts.js",
+    "bexio-invoices.js"
+  ]
+}
