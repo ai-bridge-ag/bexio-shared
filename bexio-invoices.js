@@ -101,9 +101,19 @@ function toChf(amount, currencyId) {
 function normalize(inv, contactMap) {
   const total = Number(inv.total ?? 0);
   const remaining = Number(inv.total_remaining_payments ?? 0);
+  // NET amount excl. VAT — Bexio's own `total_net` (the sum of net positions).
+  // Use this field directly, never total/1.081: VAT rates vary and some
+  // invoices are exempt, in which case total_net == total. Falls back to gross
+  // if the field is missing.
+  const totalNet = Number(inv.total_net ?? total);
   const status = mapStatus(inv.kb_item_status_id);
   const total_chf = toChf(total, inv.currency_id);
   const outstanding_chf = toChf(remaining, inv.currency_id);
+  const net_chf = toChf(totalNet, inv.currency_id);
+  // Net portion of what's still owed, using THIS invoice's own net/gross ratio
+  // (actual Bexio figures, no assumed VAT rate). For an unpaid invoice
+  // remaining == total, so this equals net_chf.
+  const outstanding_net_chf = total > 0 ? toChf(remaining * (totalNet / total), inv.currency_id) : outstanding_chf;
   const customer_name = inv.contact_id
     ? (contactMap?.get(inv.contact_id) || `contact:${inv.contact_id}`)
     : '(no contact)';
@@ -114,7 +124,9 @@ function normalize(inv, contactMap) {
     customer_name,
     customer_id: inv.contact_id || null,
     total_chf,
+    net_chf,             // gross excl. VAT (Bexio total_net)
     outstanding_chf,
+    outstanding_net_chf, // net portion still owed
     amount_chf: outstanding_chf, // forecast.js backwards-compat
     status,
     issued_date: inv.is_valid_from || null,
