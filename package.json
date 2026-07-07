@@ -4,6 +4,9 @@
   "description": "Read-only Bexio adapter shared by AI Bridge agents",
   "type": "module",
   "main": "index.js",
+  "scripts": {
+    "test": "node --test tests/"
+  },
   "exports": {
     ".": "./index.js"
   },
