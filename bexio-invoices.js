@@ -52,9 +52,21 @@ const STATUS_MAP = {
   10: 'open',        // partially paid — still has outstanding amount
   15: 'cancelled',
   16: 'cancelled',
-  19: 'paid',        // settled via credit voucher
+  19: 'paid',        // settled via credit voucher — see FULL-CREDIT OVERRIDE in normalize()
   21: 'overdue',
 };
+
+// FULL-CREDIT OVERRIDE: a "settled" invoice whose credit vouchers cover the
+// entire gross total is a STORNO (Gutschrift cancellation), not revenue.
+// Learned 2026-07-07: SNB RE-00490 and Promptathons RE-00387/388/389 carried
+// status 19 and read as 21'790 CHF of phantom "paid" revenue. Bexio reuses
+// status 19 for both genuine credit-settlement and storno; the voucher total
+// is the only reliable discriminator. 1-rappen epsilon absorbs rounding.
+function isFullyCredited(inv) {
+  const total = Number(inv.total ?? 0);
+  const credited = Number(inv.total_credit_vouchers ?? 0);
+  return total > 0 && credited >= total - 0.01;
+}
 
 // Bexio web UI base. Same for every tenant — they don't per-subdomain. The
 // tenant is identified by the session cookie, not the URL. The invoice detail
@@ -98,7 +110,7 @@ function toChf(amount, currencyId) {
  *   issued_date / due_date / paid_date
  *   bexio_url       direct link to the invoice detail page in Bexio web UI
  */
-function normalize(inv, contactMap) {
+export function normalize(inv, contactMap) {
   const total = Number(inv.total ?? 0);
   const remaining = Number(inv.total_remaining_payments ?? 0);
   // NET amount excl. VAT — Bexio's own `total_net` (the sum of net positions).
@@ -106,7 +118,11 @@ function normalize(inv, contactMap) {
   // invoices are exempt, in which case total_net == total. Falls back to gross
   // if the field is missing.
   const totalNet = Number(inv.total_net ?? total);
-  const status = mapStatus(inv.kb_item_status_id);
+  const status = isFullyCredited(inv) ? 'cancelled' : mapStatus(inv.kb_item_status_id);
+  // Partial credits (Gutschrift on part of the invoice) stay at their mapped
+  // status but the credited amount is exposed so revenue consumers can deduct
+  // it — net_chf alone overstates those invoices.
+  const credited = Number(inv.total_credit_vouchers ?? 0);
   const total_chf = toChf(total, inv.currency_id);
   const outstanding_chf = toChf(remaining, inv.currency_id);
   const net_chf = toChf(totalNet, inv.currency_id);
@@ -125,6 +141,11 @@ function normalize(inv, contactMap) {
     customer_id: inv.contact_id || null,
     total_chf,
     net_chf,             // gross excl. VAT (Bexio total_net)
+    credited_chf: toChf(credited, inv.currency_id), // Gutschriften applied (gross)
+    // Net revenue actually earned on this invoice: net minus the net portion
+    // of what was credited (same own-ratio approach as outstanding_net_chf —
+    // never an assumed VAT rate). Fully credited → 0.
+    earned_net_chf: total > 0 ? toChf(totalNet * (1 - Math.min(credited, total) / total), inv.currency_id) : net_chf,
     outstanding_chf,
     outstanding_net_chf, // net portion still owed
     amount_chf: outstanding_chf, // forecast.js backwards-compat
